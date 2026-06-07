@@ -321,6 +321,158 @@ bot.command('ayuda', ctx => ctx.reply(
   { parse_mode: 'Markdown' }
 ))
 
+// ── Admin ─────────────────────────────────────────────────────
+const ADMIN_ID = '9865176'
+
+function isAdmin(ctx) {
+  return String(ctx.from.id) === ADMIN_ID
+}
+
+bot.command('admin', async ctx => {
+  if (!isAdmin(ctx)) return ctx.reply('⛔ No tienes permiso para esto.')
+  const perfiles = db.get('perfiles').value() || {}
+  const total = Object.keys(perfiles).length
+  await ctx.reply(
+    `🛠 *Panel de Admin*\n\n👥 Perfiles registrados: *${total}*`,
+    {
+      parse_mode: 'MarkdownV2',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('👥 Ver todos los perfiles', 'admin_ver')],
+        [Markup.button.callback('🗑 Borrar un perfil',       'admin_borrar_menu')],
+        [Markup.button.callback('💘 Ver todos los matches',  'admin_matches')],
+        [Markup.button.callback('🔄 Resetear TODO',          'admin_reset_confirm')],
+      ])
+    }
+  )
+})
+
+bot.action('admin_ver', async ctx => {
+  if (!isAdmin(ctx)) return ctx.answerCbQuery('⛔ Sin permiso')
+  await ctx.answerCbQuery()
+  const perfiles = db.get('perfiles').value() || {}
+  const lista = Object.values(perfiles)
+  if (!lista.length) return ctx.reply('No hay perfiles aún.')
+  await ctx.reply(`👥 *${lista.length} perfiles registrados:*`, { parse_mode: 'MarkdownV2' })
+  for (const p of lista) {
+    const likes = getLikes(p.userId)
+    const numMatches = likes.dado.filter(id => esMatch(p.userId, id)).length
+    await ctx.reply(
+      formatPerfil(p, true) + `\n\n🆔 ID: \`${escapeMd(p.userId)}\`\n💖 Likes dados: ${likes.dado.filter(id=>!id.endsWith('_pass')).length} · Matches: ${numMatches}`,
+      {
+        parse_mode: 'MarkdownV2',
+        ...Markup.inlineKeyboard([
+          Markup.button.callback(`🗑 Borrar a ${p.nombre}`, `admin_del_${p.userId}`)
+        ])
+      }
+    )
+  }
+})
+
+bot.action('admin_borrar_menu', async ctx => {
+  if (!isAdmin(ctx)) return ctx.answerCbQuery('⛔ Sin permiso')
+  await ctx.answerCbQuery()
+  const perfiles = db.get('perfiles').value() || {}
+  const lista = Object.values(perfiles)
+  if (!lista.length) return ctx.reply('No hay perfiles para borrar.')
+  const botones = lista.map(p => [Markup.button.callback(`🗑 ${p.nombre} (${p.edad}) — ${p.ciudad}`, `admin_del_${p.userId}`)])
+  await ctx.reply('¿Qué perfil quieres borrar?', Markup.inlineKeyboard(botones))
+})
+
+bot.action(/^admin_del_(.+)$/, async ctx => {
+  if (!isAdmin(ctx)) return ctx.answerCbQuery('⛔ Sin permiso')
+  await ctx.answerCbQuery()
+  const uid = ctx.match[1]
+  const p = getPerfil(uid)
+  if (!p) return ctx.reply('Perfil no encontrado.')
+  await ctx.reply(
+    `⚠️ ¿Seguro que quieres borrar el perfil de *${escapeMd(p.nombre)}*?`,
+    {
+      parse_mode: 'MarkdownV2',
+      ...Markup.inlineKeyboard([
+        Markup.button.callback('✅ Sí, borrar', `admin_delok_${uid}`),
+        Markup.button.callback('❌ Cancelar',   'admin_cancel'),
+      ])
+    }
+  )
+})
+
+bot.action(/^admin_delok_(.+)$/, async ctx => {
+  if (!isAdmin(ctx)) return ctx.answerCbQuery('⛔ Sin permiso')
+  await ctx.answerCbQuery()
+  const uid = ctx.match[1]
+  const p = getPerfil(uid)
+  if (!p) return ctx.reply('Perfil no encontrado.')
+  const nombre = p.nombre
+  db.unset(`perfiles.${uid}`).write()
+  db.unset(`likes.${uid}`).write()
+  db.unset(`pasos.${uid}`).write()
+  // Eliminar este usuario de los likes de los demás
+  const todosLikes = db.get('likes').value() || {}
+  for (const [otherId, data] of Object.entries(todosLikes)) {
+    if (data.dado)     data.dado     = data.dado.filter(id => id !== uid && id !== uid+'_pass')
+    if (data.recibido) data.recibido = data.recibido.filter(id => id !== uid)
+    db.set(`likes.${otherId}`, data).write()
+  }
+  await ctx.reply(`✅ Perfil de *${escapeMd(nombre)}* borrado correctamente.`, { parse_mode: 'MarkdownV2' })
+})
+
+bot.action('admin_matches', async ctx => {
+  if (!isAdmin(ctx)) return ctx.answerCbQuery('⛔ Sin permiso')
+  await ctx.answerCbQuery()
+  const perfiles = db.get('perfiles').value() || {}
+  const vistos = new Set()
+  const matches = []
+  for (const [uid] of Object.entries(perfiles)) {
+    const likes = getLikes(uid).dado.filter(id => !id.endsWith('_pass'))
+    for (const otherId of likes) {
+      const key = [uid, otherId].sort().join('_')
+      if (!vistos.has(key) && esMatch(uid, otherId)) {
+        vistos.add(key)
+        const a = getPerfil(uid)
+        const b = getPerfil(otherId)
+        if (a && b) matches.push([a, b])
+      }
+    }
+  }
+  if (!matches.length) return ctx.reply('No hay matches aún.')
+  await ctx.reply(`💘 *${matches.length} match${matches.length > 1 ? 'es' : ''} en total:*`, { parse_mode: 'MarkdownV2' })
+  for (const [a, b] of matches) {
+    await ctx.reply(
+      `💘 *${escapeMd(a.nombre)}* \\+ *${escapeMd(b.nombre)}*\n` +
+      `📱 ${escapeMd(a.nombre)}: ${escapeMd(a.telefono||'—')} ${escapeMd(a.instagram||'')}\n` +
+      `📱 ${escapeMd(b.nombre)}: ${escapeMd(b.telefono||'—')} ${escapeMd(b.instagram||'')}`,
+      { parse_mode: 'MarkdownV2' }
+    )
+  }
+})
+
+bot.action('admin_reset_confirm', async ctx => {
+  if (!isAdmin(ctx)) return ctx.answerCbQuery('⛔ Sin permiso')
+  await ctx.answerCbQuery()
+  await ctx.reply(
+    '⚠️ *¿Borrar TODOS los perfiles, likes y matches?*\nEsta acción no se puede deshacer\\.',
+    {
+      parse_mode: 'MarkdownV2',
+      ...Markup.inlineKeyboard([
+        Markup.button.callback('💣 Sí, resetear todo', 'admin_reset_ok'),
+        Markup.button.callback('❌ Cancelar',           'admin_cancel'),
+      ])
+    }
+  )
+})
+
+bot.action('admin_reset_ok', async ctx => {
+  if (!isAdmin(ctx)) return ctx.answerCbQuery('⛔ Sin permiso')
+  await ctx.answerCbQuery()
+  db.set('perfiles', {}).set('likes', {}).set('pasos', {}).write()
+  await ctx.reply('✅ Base de datos reseteada. Todo borrado.')
+})
+
+bot.action('admin_cancel', async ctx => {
+  await ctx.answerCbQuery()
+  await ctx.reply('❌ Operación cancelada.')
+})
+
 // ── Arrancar ──────────────────────────────────────────────────
 bot.launch()
 console.log('🤖 FiestaMatch Bot arrancado. Pulsa Ctrl+C para parar.')
