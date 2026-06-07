@@ -29,8 +29,9 @@ const PREGUNTAS = {
   busco:       '💞 ¿Qué estás buscando?',
   gustos:      '🎯 ¿Cuáles son tus gustos o hobbies? (escríbelos separados por comas)\n_Ej: música en directo, senderismo, cocina..._',
   descripcion: '📝 Cuéntanos algo breve sobre ti (o escribe /saltar para dejarlo en blanco)',
-  instagram:   '📸 ¿Cuál es tu Instagram? (o /saltar si no quieres ponerlo)',
-  telefono:    '📱 Tu teléfono — *solo se mostrará si hay un match mutuo* (o /saltar)',
+  instagram:   '📸 ¿Cuál es tu Instagram? *(Obligatorio)*',
+  pena:        '🎉 ¿De qué peña eres? (Si no eres de ninguna peña pon "ninguna")',
+  telefono:    '📱 Tu teléfono — *solo se mostrará si hay un match mutuo (Obligatorio)*',
 }
 const BUSCO_OPS = Markup.inlineKeyboard([
   [Markup.button.callback('👧 Chica',  'busco_chica')],
@@ -54,9 +55,16 @@ function formatPerfil(p, mostrarContacto = false) {
   const gustos = p.gustos ? p.gustos.split(',').map(g => `#${g.trim().replace(/\s+/g,'_')}`).join(' ') : ''
   let txt = `👤 *${escapeMd(p.nombre)}*, ${p.edad} años\n`
   txt += `📍 ${escapeMd(p.ciudad)}\n`
+  
+  // Mostrar la peña si tiene una puesta y no es "ninguna"
+  if (p.pena && p.pena.toLowerCase() !== 'ninguna') {
+    txt += `🎉 Peña: *${escapeMd(p.pena)}*\n`
+  }
+
   txt += `💞 Busca: ${escapeMd(p.busco)}\n`
   if (gustos)     txt += `🎯 ${escapeMd(gustos)}\n`
   if (p.descripcion) txt += `\n_${escapeMd(p.descripcion)}_\n`
+  
   if (mostrarContacto) {
     if (p.instagram) txt += `\n📸 Instagram: ${escapeMd(p.instagram)}`
     if (p.telefono)  txt += `\n📱 Teléfono: ${escapeMd(p.telefono)}`
