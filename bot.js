@@ -1,7 +1,5 @@
 // ============================================================
 //  FiestaMatch Bot 💘
-//  Pon tu BOT_TOKEN y ADMIN_ID en las variables de entorno
-//  antes de arrancar en Railway.
 // ============================================================
 
 const { Telegraf, Markup } = require('telegraf')
@@ -205,115 +203,7 @@ bot.command('miperfil', async ctx => {
   await ctx.reply(formatPerfil(p, false), { parse_mode: 'MarkdownV2' })
 })
 
-// ── Explorar ─────────────────────────────────────────────────
-async function mostrarSiguientePerfil(ctx) {
-  const uid = String(ctx.from.id)
-  if (!getPerfil(uid)) {
-    return ctx.reply('Primero crea tu perfil con /start 😊')
-  }
-  const lista = getPerfilesParaVer(ctx.from.id)
-  if (!lista.length) {
-    return ctx.reply('😅 Has visto todos los perfiles por ahora. ¡Vuelve más tarde!\n\nEscribe /matches para ver tus matches.')
-  }
-  const p = lista[0]
-  await ctx.reply(
-    formatPerfil(p, false),
-    {
-      parse_mode: 'MarkdownV2',
-      ...Markup.inlineKeyboard([
-        Markup.button.callback('❌ Pasar',    `pasar_${p.userId}`),
-        Markup.button.callback('💖 Me gusta', `like_${p.userId}`),
-      ])
-    }
-  )
-}
-
-// ── Matches ───────────────────────────────────────────────────
-async function mostrarMatches(ctx) {
-  const uid = String(ctx.from.id)
-  const dado = getLikes(uid).dado
-  const matches = dado.filter(id => esMatch(uid, id)).map(id => getPerfil(id)).filter(Boolean)
-
-  if (!matches.length) {
-    return ctx.reply('Aún no tienes matches 😢\nEscribe /explorar para ver perfiles.')
-  }
-  await ctx.reply(`✨ Tienes *${matches.length} match${matches.length > 1 ? 'es' : ''}*\\:`, { parse_mode: 'MarkdownV2' })
-  for (const p of matches) {
-    await ctx.reply(formatPerfil(p, true), { parse_mode: 'MarkdownV2' })
-  }
-}
-
-// ── Captura de texto libre (registro) ────────────────────────
-bot.on('text', async ctx => {
-  const uid  = String(ctx.from.id)
-  const estado = getPaso(uid)
-  if (!estado.actual) return
-
-  const texto = ctx.message.text.trim()
-  if (texto.startsWith('/')) return
-
-  await procesarRespuesta(ctx, uid, estado.actual, texto)
-})
-
-async function procesarRespuesta(ctx, uid, paso, valor) {
-  const estado  = getPaso(uid)
-  const perfil  = getPerfil(uid) || { userId: uid }
-
-  if (paso === 'edad') {
-    const n = parseInt(valor)
-    if (!valor || isNaN(n) || n < 18 || n > 99) {
-      return ctx.reply('⚠️ Por favor, introduce una edad válida (entre 18 y 99).')
-    }
-    perfil.edad = n
-  } else if (paso === 'nombre') {
-    if (!valor || valor.length < 2) return ctx.reply('⚠️ El nombre no puede estar vacío.')
-    perfil.nombre = valor
-  } else if (paso === 'ciudad') {
-    if (!valor || valor.length < 2) return ctx.reply('⚠️ La ciudad no puede estar vacía.')
-    perfil.ciudad = valor
-  } else if (paso === 'busco') {
-    if (!valor) return ctx.reply('⚠️ Elige una opción de los botones de arriba.')
-    perfil.busco = valor
-  } else if (paso === 'gustos') {
-    if (!valor || valor.length < 2) return ctx.reply('⚠️ Cuéntanos al menos un gusto.')
-    perfil.gustos = valor
-  } else {
-    if (valor) perfil[paso] = valor
-    else perfil[paso] = ''
-  }
-
-  setPerfil(uid, perfil)
-  const idx = PASOS.indexOf(paso)
-
-  if (idx + 1 < PASOS.length) {
-    await preguntarSiguiente(ctx, PASOS[idx + 1])
-  } else {
-    setPaso(uid, {})
-    await ctx.reply(
-      `✅ ¡Perfil listo, *${escapeMd(perfil.nombre)}*\\!\n\n${formatPerfil(perfil, false)}\n\n¿Empezamos a explorar\\?`,
-      {
-        parse_mode: 'MarkdownV2',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('👀 Explorar perfiles', 'explorar')],
-          [Markup.button.callback('✨ Ver mis matches',   'ver_matches')],
-        ])
-      }
-    )
-  }
-}
-
-// ── Ayuda ─────────────────────────────────────────────────────
-bot.command('ayuda', ctx => ctx.reply(
-  `*FiestaMatch* 💘 — Comandos disponibles:\n\n` +
-  `/start — Crear o editar tu perfil\n` +
-  `/explorar — Ver perfiles y dar likes\n` +
-  `/matches — Ver tus matches (con contacto)\n` +
-  `/miperfil — Ver tu perfil actual\n` +
-  `/ayuda — Esta ayuda`,
-  { parse_mode: 'Markdown' }
-))
-
-// ── Admin ─────────────────────────────────────────────────────
+// ── Admin (¡MOVIDO ARRIBA PARA EVITAR BLOQUEOS!) ────────────────
 function isAdmin(ctx) {
   const adminIdEnv = process.env.ADMIN_ID;
   if (!adminIdEnv) return false;
@@ -321,6 +211,13 @@ function isAdmin(ctx) {
 }
 
 bot.command('admin', async ctx => {
+  // Logs de diagnóstico integrados para control
+  console.log('--- INTENTO DE ACCESO ADMIN ---');
+  console.log('Tu ID de Telegram (ctx.from.id):', ctx.from.id);
+  console.log('Variable ADMIN_ID en Railway:', process.env.ADMIN_ID);
+  console.log('¿Es Admin?:', isAdmin(ctx));
+  console.log('-------------------------------');
+
   if (!isAdmin(ctx)) return ctx.reply('⛔ No tienes permiso para esto.')
   const perfiles = db.get('perfiles').value() || {}
   const total = Object.keys(perfiles).length
@@ -350,7 +247,6 @@ bot.action('admin_ver', async ctx => {
     const likes = getLikes(p.userId)
     const numMatches = likes.dado.filter(id => esMatch(p.userId, id)).length
     
-    // Todo el texto plano dinámico y caracteres como '·' pasados de forma segura por escapeMd
     const textoAdmin = formatPerfil(p, true) + 
       `\n\n🆔 ID: \`${escapeMd(p.userId)}\`` +
       escapeMd(`\n💖 Likes dados: ${likes.dado.filter(id=>!id.endsWith('_pass')).length} · Matches: ${numMatches}`);
@@ -434,7 +330,6 @@ bot.action('admin_matches', async ctx => {
   if (!matches.length) return ctx.reply('No hay matches aún.')
   await ctx.reply(`💘 *${matches.length} match${matches.length > 1 ? 'es' : ''} en total:*`, { parse_mode: 'MarkdownV2' })
   for (const [a, b] of matches) {
-    // Escapados explícitos de los caracteres especiales para evitar crashes
     const textoMatch = `💘 *${escapeMd(a.nombre)}* \\+ *${escapeMd(b.nombre)}*\n` +
       `📱 ${escapeMd(a.nombre)}\\: ${escapeMd(a.telefono || '—')} ${escapeMd(a.instagram || '')}\n` +
       `📱 ${escapeMd(b.nombre)}\\: ${escapeMd(b.telefono || '—')} ${escapeMd(b.instagram || '')}`;
@@ -469,6 +364,114 @@ bot.action('admin_cancel', async ctx => {
   await ctx.answerCbQuery()
   await ctx.reply('❌ Operación cancelada.')
 })
+
+// ── Ayuda ─────────────────────────────────────────────────────
+bot.command('ayuda', ctx => ctx.reply(
+  `*FiestaMatch* 💘 — Comandos disponibles:\n\n` +
+  `/start — Crear o editar tu perfil\n` +
+  `/explorar — Ver perfiles y dar likes\n` +
+  `/matches — Ver tus matches (con contacto)\n` +
+  `/miperfil — Ver tu perfil actual\n` +
+  `/ayuda — Esta ayuda`,
+  { parse_mode: 'Markdown' }
+))
+
+// ── Explorar ─────────────────────────────────────────────────
+async function mostrarSiguientePerfil(ctx) {
+  const uid = String(ctx.from.id)
+  if (!getPerfil(uid)) {
+    return ctx.reply('Primero crea tu perfil con /start 😊')
+  }
+  const lista = getPerfilesParaVer(ctx.from.id)
+  if (!lista.length) {
+    return ctx.reply('😅 Has visto todos los perfiles por ahora. ¡Vuelve más tarde!\n\nEscribe /matches para ver tus matches.')
+  }
+  const p = lista[0]
+  await ctx.reply(
+    formatPerfil(p, false),
+    {
+      parse_mode: 'MarkdownV2',
+      ...Markup.inlineKeyboard([
+        Markup.button.callback('❌ Pasar',    `pasar_${p.userId}`),
+        Markup.button.callback('💖 Me gusta', `like_${p.userId}`),
+      ])
+    }
+  )
+}
+
+// ── Matches ───────────────────────────────────────────────────
+async function mostrarMatches(ctx) {
+  const uid = String(ctx.from.id)
+  const dado = getLikes(uid).dado
+  const matches = dado.filter(id => esMatch(uid, id)).map(id => getPerfil(id)).filter(Boolean)
+
+  if (!matches.length) {
+    return ctx.reply('Aún no tienes matches 😢\nEscribe /explorar para ver perfiles.')
+  }
+  await ctx.reply(`✨ Tienes *${matches.length} match${matches.length > 1 ? 'es' : ''}*\\:`, { parse_mode: 'MarkdownV2' })
+  for (const p of matches) {
+    await ctx.reply(formatPerfil(p, true), { parse_mode: 'MarkdownV2' })
+  }
+}
+
+// ── Captura de texto libre (registro) (¡AL FINAL DE TODO!) ────
+bot.on('text', async ctx => {
+  const uid  = String(ctx.from.id)
+  const estado = getPaso(uid)
+  if (!estado.actual) return
+
+  const texto = ctx.message.text.trim()
+  if (texto.startsWith('/')) return
+
+  await procesarRespuesta(ctx, uid, estado.actual, texto)
+})
+
+async function procesarRespuesta(ctx, uid, paso, valor) {
+  const estado  = getPaso(uid)
+  const perfil  = getPerfil(uid) || { userId: uid }
+
+  if (paso === 'edad') {
+    const n = parseInt(valor)
+    if (!valor || isNaN(n) || n < 18 || n > 99) {
+      return ctx.reply('⚠️ Por favor, introduce una edad válida (entre 18 y 99).')
+    }
+    perfil.edad = n
+  } else if (paso === 'nombre') {
+    if (!valor || valor.length < 2) return ctx.reply('⚠️ El nombre no puede estar vacío.')
+    perfil.nombre = valor
+  } else if (paso === 'ciudad') {
+    if (!valor || valor.length < 2) return ctx.reply('⚠️ La ciudad no puede estar vacía.')
+    perfil.ciudad = valor
+  } else if (paso === 'busco') {
+    if (!valor) return ctx.reply('⚠️ Elige una opción de los botones de arriba.')
+    perfil.busco = valor
+  } else if (paso === 'gustos') {
+    if (!valor || valor.length < 2) return ctx.reply('⚠️ Cuéntanos al menos un gusto.')
+    perfil.gustos = valor
+  } else {
+    if (valor) perfil[paso] = valor
+    else perfil[paso] = ''
+  }
+
+  setPerfil(uid, perfil)
+  const idx = PASOS.indexOf(paso)
+
+  if (idx + 1 < PASOS.length) {
+    await preguntarSiguiente(ctx, PASOS[idx + 1])
+  } else {
+    setPaso(uid, {})
+    await ctx.reply(
+      `✅ ¡Perfil listo, *${escapeMd(perfil.nombre)}*\\!\n\n${formatPerfil(perfil, false)}\n\n¿Empezamos a explorar\\?`,
+      {
+        parse_mode: 'MarkdownV2',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('👀 Explorar perfiles', 'explorar')],
+          [Markup.button.callback('✨ Ver mis matches',   'ver_matches')],
+        ])
+      }
+    )
+  }
+}
 
 // ── Arrancar ──────────────────────────────────────────────────
 bot.launch()
