@@ -58,7 +58,6 @@ function formatPerfil(p, mostrarContacto = false) {
   let txt = `👤 *${escapeMd(p.nombre)}*, ${p.edad} años\n`
   txt += `📍 ${escapeMd(p.ciudad)}\n`
   
-  // Mostrar la peña si tiene una asignada y no es "ninguna"
   if (p.pena && p.pena.toLowerCase() !== 'ninguna') {
     txt += `🎉 Peña: *${escapeMd(p.pena)}*\n`
   }
@@ -123,7 +122,7 @@ bot.command('start', async ctx => {
       }
     )
   } else {
-    setPaso(uid, {})
+    setPaso(uid, { pasados: [] }) // Inicializar limpio
     await preguntarSiguiente(ctx, 'nombre')
   }
 })
@@ -133,7 +132,6 @@ bot.command('saltar', async ctx => {
   const estado = getPaso(uid)
   if (!estado.actual) return
   
-  // El Instagram es obligatorio, no permitimos /saltar
   if (estado.actual === 'instagram') {
     return ctx.reply('⚠️ El Instagram es obligatorio para poder encontrar tu match. ¡Escríbelo!')
   }
@@ -141,13 +139,12 @@ bot.command('saltar', async ctx => {
   await procesarRespuesta(ctx, uid, estado.actual, null)
 })
 
-// Botones del menú de inicio
 bot.action('explorar',      ctx => { ctx.answerCbQuery(); mostrarSiguientePerfil(ctx) })
 bot.action('ver_matches',   ctx => { ctx.answerCbQuery(); mostrarMatches(ctx) })
 bot.action('editar_perfil', ctx => {
   ctx.answerCbQuery()
   const uid = String(ctx.from.id)
-  setPaso(uid, {})
+  setPaso(uid, { pasados: db.get(`pasos.${uid}.pasados`).value() || [] })
   preguntarSiguiente(ctx, 'nombre')
 })
 
@@ -227,12 +224,6 @@ function isAdmin(ctx) {
 }
 
 bot.command('admin', async ctx => {
-  console.log('--- INTENTO DE ACCESO ADMIN ---');
-  console.log('Tu ID de Telegram (ctx.from.id):', ctx.from.id);
-  console.log('Variable ADMIN_ID en Railway:', process.env.ADMIN_ID);
-  console.log('¿Es Admin?:', isAdmin(ctx));
-  console.log('-------------------------------');
-
   if (!isAdmin(ctx)) return ctx.reply('⛔ No tienes permiso para esto.')
   const perfiles = db.get('perfiles').value() || {}
   const total = Object.keys(perfiles).length
@@ -269,7 +260,7 @@ bot.action('admin_ver', async ctx => {
     await ctx.reply(textoAdmin, {
         parse_mode: 'MarkdownV2',
         ...Markup.inlineKeyboard([
-          Markup.button.callback(`🗑 Borrar a ${p.nombre}`, `admin_del_${p.userId}`)
+          [Markup.button.callback(`🗑 Borrar a ${p.nombre}`, `admin_del_${p.userId}`)]
         ])
       }
     )
@@ -354,3 +345,151 @@ bot.action('admin_matches', async ctx => {
 })
 
 bot.action('admin_reset_confirm', async ctx => {
+  if (!isAdmin(ctx)) return ctx.answerCbQuery('⛔ Sin permiso')
+  await ctx.answerCbQuery()
+  await ctx.reply(
+    '⚠️ *¿Borrar TODOS los perfiles, likes y matches?*\nEsta acción no se puede deshacer\\.',
+    {
+      parse_mode: 'MarkdownV2',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('💣 Sí, resetear todo', 'admin_reset_ok')],
+        [Markup.button.callback('❌ Cancelar',            'admin_cancel')],
+      ])
+    }
+  )
+})
+
+bot.action('admin_reset_ok', async ctx => {
+  if (!isAdmin(ctx)) return ctx.answerCbQuery('⛔ Sin permiso')
+  await ctx.answerCbQuery()
+  db.set('perfiles', {}).set('likes', {}).set('pasos', {}).write()
+  await ctx.reply('✅ Base de datos reseteada. Todo borrado.')
+})
+
+bot.action('admin_cancel', async ctx => {
+  await ctx.answerCbQuery()
+  await ctx.reply('❌ Operación cancelada.')
+})
+
+// ── Ayuda ─────────────────────────────────────────────────────
+bot.command('ayuda', ctx => ctx.reply(
+  `*FiestaMatch* 💘 — Comandos disponibles:\n\n` +
+  `/start — Crear o editar tu perfil\n` +
+  `/explorar — Ver perfiles y dar likes\n` +
+  `/matches — Ver tus matches (con contacto)\n` +
+  `/miperfil — Ver tu perfil actual\n` +
+  `/ayuda — Esta ayuda`,
+  { parse_mode: 'Markdown' }
+))
+
+// ── Explorar ─────────────────────────────────────────────────
+async function mostrarSiguientePerfil(ctx) {
+  const uid = String(ctx.from.id)
+  if (!getPerfil(uid)) {
+    return ctx.reply('Primero crea tu perfil con /start 😊')
+  }
+  const lista = getPerfilesParaVer(ctx.from.id)
+  if (!lista.length) {
+    return ctx.reply('😅 Has visto todos los perfiles por ahora. ¡Vuelve más tarde!\n\nEscribe /matches para ver tus matches.')
+  }
+  const p = lista[0]
+  await ctx.reply(
+    formatPerfil(p, false),
+    {
+      parse_mode: 'MarkdownV2',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('❌ Pasar',    `pasar_${p.userId}`),
+         Markup.button.callback('💖 Me gusta', `like_${p.userId}`)],
+      ])
+    }
+  )
+}
+
+// ── Matches ───────────────────────────────────────────────────
+async function mostrarMatches(ctx) {
+  const uid = String(ctx.from.id)
+  const dado = getLikes(uid).dado
+  const matches = dado.filter(id => esMatch(uid, id)).map(id => getPerfil(id)).filter(Boolean)
+
+  if (!matches.length) {
+    return ctx.reply('Aún no tienes matches 😢\nEscribe /explorar para ver perfiles.')
+  }
+  await ctx.reply(`✨ Tienes *${matches.length} match${matches.length > 1 ? 'es' : ''}*\\:`, { parse_mode: 'MarkdownV2' })
+  for (const p of matches) {
+    await ctx.reply(formatPerfil(p, true), { parse_mode: 'MarkdownV2' })
+  }
+}
+
+// ── Captura de texto libre (registro) ────────────────────────
+bot.on('text', async ctx => {
+  const uid  = String(ctx.from.id)
+  const estado = getPaso(uid)
+  if (!estado.actual) return
+
+  const texto = ctx.message.text.trim()
+  if (texto.startsWith('/')) return
+
+  await procesarRespuesta(ctx, uid, estado.actual, texto)
+})
+
+async function procesarRespuesta(ctx, uid, paso, valor) {
+  const estado  = getPaso(uid)
+  const perfil  = getPerfil(uid) || { userId: uid }
+
+  if (paso === 'edad') {
+    const n = parseInt(valor)
+    if (!valor || isNaN(n) || n < 18 || n > 99) {
+      return ctx.reply('⚠️ Por favor, introduce una edad válida (entre 18 y 99).')
+    }
+    perfil.edad = n
+  } else if (paso === 'nombre') {
+    if (!valor || valor.length < 2) return ctx.reply('⚠️ El nombre no puede estar vacío.')
+    perfil.nombre = valor
+  } else if (paso === 'ciudad') {
+    if (!valor || valor.length < 2) return ctx.reply('⚠️ La ciudad no puede estar vacía.')
+    perfil.ciudad = valor
+  } else if (paso === 'busco') {
+    if (!valor) return ctx.reply('⚠️ Elige una opción de los botones de arriba.')
+    perfil.busco = valor
+  } else if (paso === 'gustos') {
+    if (!valor || valor.length < 2) return ctx.reply('⚠️ Cuéntanos al menos un gusto.')
+    perfil.gustos = valor
+  } else if (paso === 'instagram') {
+    if (!valor || valor.trim().length < 3) {
+      return ctx.reply('⚠️ Por favor, introduce una cuenta de Instagram válida.')
+    }
+    perfil.instagram = valor.trim()
+  } else if (paso === 'pena') {
+    perfil.pena = valor ? valor.trim() : 'ninguna'
+  } else {
+    if (valor) perfil[paso] = valor
+    else perfil[paso] = ''
+  }
+
+  setPerfil(uid, perfil)
+  
+  // Forzar indexación exacta basándonos en el array estricto PASOS
+  const idx = PASOS.indexOf(paso)
+
+  if (idx !== -1 && idx + 1 < PASOS.length) {
+    await preguntarSiguiente(ctx, PASOS[idx + 1])
+  } else {
+    setPaso(uid, { pasados: estado.pasados || [] }) // Guardar solo los vistos e invalidar estado actual
+    await ctx.reply(
+      `✅ ¡Perfil listo, *${escapeMd(perfil.nombre)}*\\!\n\n${formatPerfil(perfil, false)}\n\n¿Empezamos a explorar\\?`,
+      {
+        parse_mode: 'MarkdownV2',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('👀 Explorar perfiles', 'explorar')],
+          [Markup.button.callback('✨ Ver mis matches',   'ver_matches')],
+        ])
+      }
+    )
+  }
+}
+
+// ── Arrancar ──────────────────────────────────────────────────
+bot.launch()
+console.log('🤖 FiestaMatch Bot arrancado. Pulsa Ctrl+C para parar.')
+process.once('SIGINT',  () => bot.stop('SIGINT'))
+process.once('SIGTERM', () => bot.stop('SIGTERM'))
