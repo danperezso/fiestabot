@@ -322,7 +322,7 @@ bot.command('ayuda', ctx => ctx.reply(
 ))
 
 // ── Admin ─────────────────────────────────────────────────────
-const ADMIN_ID = process.env.ADMIN_ID || '9865176'
+const ADMIN_ID = '9865176'
 
 function isAdmin(ctx) {
   return String(ctx.from.id) === ADMIN_ID
@@ -341,9 +341,6 @@ bot.command('admin', async ctx => {
         [Markup.button.callback('🗑 Borrar un perfil',       'admin_borrar_menu')],
         [Markup.button.callback('💘 Ver todos los matches',  'admin_matches')],
         [Markup.button.callback('🔄 Resetear TODO',          'admin_reset_confirm')],
-bot.command('miid', async ctx => {
-  await ctx.reply(`Tu ID es: \`${ctx.from.id}\``, { parse_mode: 'Markdown' })
-})
       ])
     }
   )
