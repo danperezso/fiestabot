@@ -1,6 +1,6 @@
 // ============================================================
 //  FiestaMatch Bot 💘
-//  Pon tu BOT_TOKEN y ADMIN_ID en las variables de entorno
+//  Pon tu BOT_TOKEN and ADMIN_ID en las variables de entorno
 //  antes de arrancar en Railway.
 // ============================================================
 
@@ -32,14 +32,33 @@ const PREGUNTAS = {
   gustos:      '🎯 ¿Cuáles son tus gustos o hobbies? (escríbelos separados por comas)\n_Ej: música en directo, senderismo, cocina..._',
   descripcion: '📝 Cuéntanos algo breve sobre ti (o escribe /saltar para dejarlo en blanco)',
   instagram:   '📸 ¿Cuál es tu Instagram? *(Obligatorio)*',
-  pena:        '🎉 ¿De qué peña eres? (Si no eres de ninguna peña pon "ninguna")',
+  pena:        '🎉 ¿De qué peña eres? Selecciona una de las opciones:',
   telefono:    '📱 Tu teléfono — *solo se mostrará si hay un match mutuo* (o /saltar)',
 }
+
 const BUSCO_OPS = Markup.inlineKeyboard([
   [Markup.button.callback('👧 Chica',  'busco_chica')],
   [Markup.button.callback('👦 Chico',  'busco_chico')],
   [Markup.button.callback('🧑 Cualquier persona', 'busco_cualquier')],
 ])
+
+// Teclado interactivo para las Peñas (Organizado en filas de 2 botones)
+const PENA_OPS = Markup.inlineKeyboard([
+  [Markup.button.callback('La Talanquera', 'pena_La Talanquera'), Markup.button.callback('La Rodea', 'pena_La Rodea')],
+  [Markup.button.callback('La Charanga', 'pena_La Charanga'), Markup.button.callback('Tentenecio', 'pena_Tentenecio')],
+  [Markup.button.callback('Las Chigüitas', 'pena_Las Chigüitas'), Markup.button.callback('La Cuadrilla', 'pena_La Cuadrilla')],
+  [Markup.button.callback('La Tantáriga', 'pena_La Tantáriga'), Markup.button.callback('L@s de Mantenimiento', 'pena_L@s de Mantenimiento')],
+  [Markup.button.callback('La Piuka', 'pena_La Piuka'), Markup.button.callback('El Pozo', 'pena_El Pozo')],
+  [Markup.button.callback('La Ruina 💥', 'pena_La Ruina'), Markup.button.callback('Los Calchakis', 'pena_Los Calchakis')],
+  [Markup.button.callback('❌ Ninguna peña', 'pena_Ninguna')]
+])
+
+// Mapeo manual de las opciones válidas para comprobar la obligatoriedad
+const PEÑAS_VALIDAS = [
+  'La Talanquera', 'La Rodea', 'La Charanga', 'Tentenecio', 'Las Chigüitas', 
+  'La Cuadrilla', 'La Tantáriga', 'L@s de Mantenimiento', 'La Piuka', 'El Pozo', 
+  'La Ruina', 'Los Calchakis', 'Ninguna'
+]
 
 // ── Helpers ──────────────────────────────────────────────────
 const getPerfil   = id => db.get(`perfiles.${id}`).value()
@@ -59,7 +78,7 @@ function formatPerfil(p, mostrarContacto = false) {
   txt += `📍 ${escapeMd(p.ciudad)}\n`
   
   if (p.pena && p.pena.toLowerCase() !== 'ninguna') {
-    txt += `🎉 Peña: *${escapeMd(p.pena)}*\n`
+    txt += `🎉 Peña: *Peña ${escapeMd(p.pena)}*\n`
   }
 
   txt += `💞 Busca: ${escapeMd(p.busco)}\n`
@@ -101,6 +120,8 @@ async function preguntarSiguiente(ctx, paso) {
 
   if (paso === 'busco') {
     await ctx.reply(PREGUNTAS.busco, BUSCO_OPS)
+  } else if (paso === 'pena') {
+    await ctx.reply(PREGUNTAS.pena, PENA_OPS)
   } else {
     await ctx.reply(PREGUNTAS[paso], { parse_mode: 'Markdown' })
   }
@@ -122,7 +143,7 @@ bot.command('start', async ctx => {
       }
     )
   } else {
-    setPaso(uid, { pasados: [] }) // Inicializar limpio
+    setPaso(uid, { pasados: [] })
     await preguntarSiguiente(ctx, 'nombre')
   }
 })
@@ -134,6 +155,9 @@ bot.command('saltar', async ctx => {
   
   if (estado.actual === 'instagram') {
     return ctx.reply('⚠️ El Instagram es obligatorio para poder encontrar tu match. ¡Escríbelo!')
+  }
+  if (estado.actual === 'pena') {
+    return ctx.reply('⚠️ Debes seleccionar una peña (o marcar "Ninguna peña") usando los botones de arriba.')
   }
   
   await procesarRespuesta(ctx, uid, estado.actual, null)
@@ -148,7 +172,7 @@ bot.action('editar_perfil', ctx => {
   preguntarSiguiente(ctx, 'nombre')
 })
 
-// Botones de "busco"
+// Acciones de botones "busco"
 for (const val of ['chica','chico','cualquier']) {
   bot.action(`busco_${val}`, async ctx => {
     await ctx.answerCbQuery()
@@ -157,6 +181,14 @@ for (const val of ['chica','chico','cualquier']) {
     await procesarRespuesta(ctx, uid, 'busco', label)
   })
 }
+
+// Acciones dinámicas de botones para capturar la peña seleccionada
+bot.action(/^pena_(.+)$/, async ctx => {
+  await ctx.answerCbQuery()
+  const uid = String(ctx.from.id)
+  const peñaSeleccionada = ctx.match[1]
+  await procesarRespuesta(ctx, uid, 'pena', peñaSeleccionada)
+})
 
 // Botones de like / pasar
 bot.action(/^like_(.+)$/, async ctx => {
@@ -429,6 +461,14 @@ bot.on('text', async ctx => {
   const texto = ctx.message.text.trim()
   if (texto.startsWith('/')) return
 
+  // Si escriben texto en los pasos obligatorios por botón, denegar y recordar usar botones
+  if (estado.actual === 'busco') {
+    return ctx.reply('⚠️ Por favor, utiliza los botones interactivos superiores para indicar qué buscas.')
+  }
+  if (estado.actual === 'pena') {
+    return ctx.reply('⚠️ Por favor, selecciona una peña de la lista de botones de arriba (o pulsa "Ninguna peña").')
+  }
+
   await procesarRespuesta(ctx, uid, estado.actual, texto)
 })
 
@@ -460,7 +500,11 @@ async function procesarRespuesta(ctx, uid, paso, valor) {
     }
     perfil.instagram = valor.trim()
   } else if (paso === 'pena') {
-    perfil.pena = valor ? valor.trim() : 'ninguna'
+    // Validación estricta para evitar inyecciones de datos corruptos externos
+    if (!valor || !PEÑAS_VALIDAS.includes(valor)) {
+      return ctx.reply('⚠️ Por favor, selecciona una peña válida usando el panel de botones.')
+    }
+    perfil.pena = valor
   } else {
     if (valor) perfil[paso] = valor
     else perfil[paso] = ''
@@ -468,13 +512,12 @@ async function procesarRespuesta(ctx, uid, paso, valor) {
 
   setPerfil(uid, perfil)
   
-  // Forzar indexación exacta basándonos en el array estricto PASOS
   const idx = PASOS.indexOf(paso)
 
   if (idx !== -1 && idx + 1 < PASOS.length) {
     await preguntarSiguiente(ctx, PASOS[idx + 1])
   } else {
-    setPaso(uid, { pasados: estado.pasados || [] }) // Guardar solo los vistos e invalidar estado actual
+    setPaso(uid, { pasados: estado.pasados || [] })
     await ctx.reply(
       `✅ ¡Perfil listo, *${escapeMd(perfil.nombre)}*\\!\n\n${formatPerfil(perfil, false)}\n\n¿Empezamos a explorar\\?`,
       {
