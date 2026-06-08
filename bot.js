@@ -12,7 +12,7 @@ require('dotenv').config()
 // ── Base de datos ────────────────────────────────────────────
 const adapter = new FileSync('db.json')
 const db = low(adapter)
-db.defaults({ perfiles: {}, likes: {}, pasos: {} }).write()
+db.defaults({ perfiles: {}, likes: {}, pasos: {}, bloqueados: [] }).write() // Añadida lista de bloqueados
 
 // ── Bot ──────────────────────────────────────────────────────
 const TOKEN = process.env.BOT_TOKEN
@@ -21,6 +21,20 @@ if (!TOKEN) {
   process.exit(1)
 }
 const bot = new Telegraf(TOKEN)
+
+// ── Middleware de restricción de edad total ─────────────────
+bot.use(async (ctx, next) => {
+  if (!ctx.from) return next()
+  const uid = String(ctx.from.id)
+  
+  // Comprobar si el usuario está en la lista de menores bloqueados
+  const estaBloqueado = db.get('bloqueados').value().includes(uid)
+  if (estaBloqueado) {
+    if (ctx.callbackQuery) await ctx.answerCbQuery('⛔ Acceso denegado')
+    return ctx.reply('⛔ *Acceso denegado:* Lo sentimos, este bot es de uso exclusivo para mayores de 18 años.', { parse_mode: 'Markdown' })
+  }
+  return next()
+})
 
 // ── Constantes ───────────────────────────────────────────────
 const PASOS = ['nombre', 'edad', 'ciudad', 'busco', 'gustos', 'descripcion', 'instagram', 'pena', 'telefono']
@@ -394,7 +408,7 @@ bot.action('admin_reset_confirm', async ctx => {
 bot.action('admin_reset_ok', async ctx => {
   if (!isAdmin(ctx)) return ctx.answerCbQuery('⛔ Sin permiso')
   await ctx.answerCbQuery()
-  db.set('perfiles', {}).set('likes', {}).set('pasos', {}).write()
+  db.set('perfiles', {}).set('likes', {}).set('pasos', {}).set('bloqueados', []).write() // Resetea también bloqueados
   await ctx.reply('✅ Base de datos reseteada. Todo borrado.')
 })
 
@@ -478,9 +492,28 @@ async function procesarRespuesta(ctx, uid, paso, valor) {
 
   if (paso === 'edad') {
     const n = parseInt(valor)
-    if (!valor || isNaN(n) || n < 18 || n > 99) {
-      return ctx.reply('⚠️ Por favor, introduce una edad válida (entre 18 y 99).')
+    
+    // Si meten letras o un número absurdo
+    if (!valor || isNaN(n) || n > 99 || n <= 0) {
+      return ctx.reply('⚠️ Por favor, introduce una edad válida.')
     }
+    
+    // Control definitivo de menores de 18
+    if (n < 18) {
+      // 1. Añadimos el ID a la lista de bloqueados permanentemente en db.json
+      const bloqueados = db.get('bloqueados').value()
+      if (!bloqueados.includes(uid)) {
+        bloqueados.push(uid)
+        db.set('bloqueados', bloqueados).write()
+      }
+      
+      // 2. Limpiamos cualquier rastro que tuviera de registro a medias
+      db.unset(`pasos.${uid}`).write()
+      db.unset(`perfiles.${uid}`).write()
+      
+      return ctx.reply('⛔ *Acceso denegado:* Lo sentimos, debes ser mayor de 18 años para poder utilizar este bot.', { parse_mode: 'Markdown' })
+    }
+    
     perfil.edad = n
   } else if (paso === 'nombre') {
     if (!valor || valor.length < 2) return ctx.reply('⚠️ El nombre no puede estar vacío.')
